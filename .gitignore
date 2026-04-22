@@ -1,0 +1,42 @@
+# Vendored emulator binaries and bundles
+/run/
+mupen64plus-bundle-win64-2.6.0.zip
+
+# ROM images (never committed)
+*.z64
+*.v64
+*.n64
+*.rom
+Pokemon Snap Station*.zip
+
+# libdragon / MIPS build artifacts
+/rom/demo/build/
+*.o
+*.obj
+*.lib
+*.pdb
+*.exp
+*.a
+*.elf
+*.elf.stripped
+*.elf.sym
+*.map
+*.d
+
+# MSVC / mingw build output at the project root
+/mupen64plus-input-snapstation.dll
+/test_joybus.exe
+/test_smart_card.exe
+/test_sticker_sheet.exe
+/sticker_sheet_demo.bmp
+
+# Runtime logs
+*.log
+
+# Claude Code session state
+/.claude/
+
+# Editor / OS cruft
+.DS_Store
+Thumbs.db
+*.swp
