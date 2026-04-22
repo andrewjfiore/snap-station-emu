@@ -1,0 +1,26 @@
+# Smart-card credit lifecycle. Exercises the PI DOM2 reader (via
+# src/smart_card.c in the dynamic track, via the N64Recomp stub in the
+# static track) plus the HLE SS_ADDR_CREDIT=0xD000 JoyBus channel.
+
+name: credit_insert_and_spend
+description: |
+  Insert a card with 5 credits, confirm ROM reads balance=5, trigger one
+  print, confirm balance=4, remove card, confirm subsequent prints fail.
+
+backends:
+  ares:
+    cmd:
+      - ares
+      - --headless
+      - --system=n64
+      - --script=emu/harness/scenarios/credit_insert_and_spend.ares.lua
+      - rom/nphe.z64
+  recomp:
+    cmd:
+      - build/recomp/snapstation_nphe
+      - --scenario=emu/harness/scenarios/credit_insert_and_spend.script
+
+expected_hashes:
+  initial_balance_5: null
+  after_one_print_balance_4: null
+  card_removed_error: null

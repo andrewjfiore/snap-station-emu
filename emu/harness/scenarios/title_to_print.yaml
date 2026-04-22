@@ -1,0 +1,48 @@
+# Canonical scenario: boot the kiosk ROM, navigate to Gallery, press Print,
+# cycle through the 16-photo display, and assert the final sticker-sheet
+# compositor output matches. Frame hashes are null until first successful
+# run pins them via `python emu/harness/run_script.py ... --pin`.
+
+name: title_to_print
+description: |
+  Drives the full CC/33/5A trigger + 01/02x16/04 capture flow on NPHE.
+  Requires a smart card with >= 1 credit pre-inserted via the control
+  socket (see emu/plugins/m64p_snapstation/README.md).
+
+backends:
+  ares:
+    cmd:
+      - ares
+      - --headless
+      - --system=n64
+      - --script=emu/harness/scenarios/title_to_print.ares.lua
+      - rom/nphe.z64
+  recomp:
+    cmd:
+      - build/recomp/snapstation_nphe
+      - --scenario=emu/harness/scenarios/title_to_print.script
+
+inputs:
+  - at: 0
+    control: insert_card
+    credits: 1
+  - at: 180
+    control: press_start
+  - at: 300
+    control: navigate_gallery
+  - at: 420
+    control: press_print
+  - at: 480
+    control: simulate_reset
+  - at: 540
+    control: display_photo
+    index: 0
+  # labels photo_1 through photo_15 repeat the display_photo step.
+
+expected_hashes:
+  title: null
+  gallery_menu: null
+  print_confirm: null
+  photo_0: null
+  photo_15: null
+  end_of_flow: null
