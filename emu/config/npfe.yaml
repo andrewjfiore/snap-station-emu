@@ -1,0 +1,44 @@
+# splat configuration for retail Pokemon Snap NTSC-U (NPFE).
+#
+# This is a bootstrap skeleton. The authoritative mapping lives in the
+# pmret/pokemonsnap decomp project, pinned at tools/pokemonsnap-reference
+# via .gitmodules. Prefer that config once the submodule is initialized.
+#
+# Usage (from repo root):
+#   git submodule update --init tools/splat tools/pokemonsnap-reference
+#   python tools/splat/split.py emu/config/npfe.yaml
+#
+# If tools/pokemonsnap-reference/cfg/us/pokemonsnap.yaml exists, that is
+# the one to prefer; this file stays minimal until we have a reason to
+# diverge (e.g. NPHE-vs-NPFE comparison lanes).
+
+name: pokemonsnap_us
+sha1: null   # pinned by emu/tools/extract_rom.py after first run
+options:
+  platform: n64
+  compiler: IDO
+  basename: pokemonsnap
+  target_path: rom/npfe.z64
+  base_path: build/npfe
+  asm_path: asm/npfe
+  src_path: src/npfe
+  asset_path: assets/npfe
+  symbol_addrs_path: symbols_npfe.txt
+  undefined_funcs_auto_path: undefined_funcs_auto_npfe.txt
+  undefined_syms_auto_path: undefined_syms_auto_npfe.txt
+  find_file_boundaries: true
+  header_encoding: ASCII
+segments:
+  - name: header
+    type: header
+    start: 0x0
+  - name: boot
+    type: bin
+    start: 0x40
+  - name: main
+    type: code
+    start: 0x1000
+    vram: 0x80000400
+    subsegments:
+      - [0x1000, asm]
+  - [0xFFFFFF]
