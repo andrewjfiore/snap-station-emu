@@ -6,29 +6,29 @@ Usage:
     python emu/harness/run_script.py <scenario.yaml> --track=recomp
     python emu/harness/run_script.py <scenario.yaml> --track=both
 
-When --track=both, the script runs each backend in turn and hard-fails if
-any labeled hash differs between tracks. This is the invariant the plan
-calls the `two-track validation`.
+When --track=both, ares and recomp run concurrently; the script
+hard-fails if any labeled hash differs between tracks. This is the
+invariant the plan calls the `two-track validation`.
 
 Backends are shelled out as subprocesses; their exact invocation is
 configured per scenario so contributors can point at a local ares build
 or a N64Recomp-produced binary without editing this script. The backend
 is expected to stream newline-delimited JSON events on stdout of the form
   {"label": "...", "frame_sha256": "..."}
-at each scripted capture point.
+at each scripted capture point. Non-JSON lines on stdout or any output
+on stderr are relayed to the harness's stderr verbatim.
 
 Frame hashes stored in the scenario YAML as null are pinned on the first
-successful run (same pattern as emu/tools/extract_rom.py). Mismatches
-against a pinned hash are a hard failure.
+successful run with --pin (same pattern as emu/tools/extract_rom.py).
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -39,12 +39,15 @@ except ImportError:  # pragma: no cover - bootstrap guidance
     sys.exit(2)
 
 
-def run_backend(cmd: list[str], env: dict[str, str]) -> list[dict[str, Any]]:
+DEFAULT_TIMEOUT_S = 60
+
+
+def run_backend(cmd: list[str], env: dict[str, str], timeout_s: int) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # merge so a single reader drains both
         env={**os.environ, **env},
         text=True,
     )
@@ -53,38 +56,40 @@ def run_backend(cmd: list[str], env: dict[str, str]) -> list[dict[str, Any]]:
         line = line.strip()
         if not line:
             continue
-        try:
-            events.append(json.loads(line))
-        except json.JSONDecodeError:
-            # Backends may log human-readable diagnostics; ignore.
-            continue
-    rc = proc.wait(timeout=60)
+        if line.startswith("{"):
+            try:
+                events.append(json.loads(line))
+                continue
+            except json.JSONDecodeError:
+                pass
+        # Non-JSON: relay as diagnostic; backends are noisy.
+        print(f"[{cmd[0]}] {line}", file=sys.stderr)
+    rc = proc.wait(timeout=timeout_s)
     if rc != 0:
-        stderr = proc.stderr.read() if proc.stderr else ""
-        raise RuntimeError(f"backend exited {rc}: {cmd}\n{stderr}")
+        raise RuntimeError(f"backend exited {rc}: {cmd}")
     return events
 
 
-def diff_tracks(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> list[str]:
+def diff_tracks(tracks: dict[str, list[dict[str, Any]]]) -> list[str]:
     errors: list[str] = []
-    by_label_a = {e.get("label"): e for e in a if "label" in e}
-    by_label_b = {e.get("label"): e for e in b if "label" in e}
-    for label in sorted(set(by_label_a) | set(by_label_b)):
-        ea, eb = by_label_a.get(label), by_label_b.get(label)
-        if ea is None or eb is None:
-            errors.append(f"label {label!r} only present on one track")
+    names = sorted(tracks.keys())
+    if len(names) < 2:
+        return errors
+    by_label = {n: {e.get("label"): e for e in tracks[n] if "label" in e} for n in names}
+    all_labels = sorted(set().union(*(by_label[n].keys() for n in names)))
+    for label in all_labels:
+        hashes = {n: by_label[n].get(label, {}).get("frame_sha256") for n in names}
+        if None in hashes.values():
+            missing = [n for n, h in hashes.items() if h is None]
+            errors.append(f"label {label!r} missing on: {missing}")
             continue
-        ha = ea.get("frame_sha256")
-        hb = eb.get("frame_sha256")
-        if ha != hb:
-            errors.append(f"label {label!r} hash mismatch: ares={ha} recomp={hb}")
+        if len(set(hashes.values())) > 1:
+            errors.append(f"label {label!r} hash mismatch: {hashes}")
     return errors
 
 
 def validate_against_pins(events: list[dict[str, Any]],
                           scenario: dict[str, Any]) -> tuple[list[str], bool]:
-    """Compare events to the scenario's expected_hashes. Returns (errors,
-    updated) where `updated` is True if any null pin was filled in."""
     errors: list[str] = []
     updated = False
     expected = scenario.setdefault("expected_hashes", {})
@@ -99,47 +104,56 @@ def validate_against_pins(events: list[dict[str, Any]],
             updated = True
             print(f"pin {label}={observed}")
         elif pinned != observed:
-            errors.append(
-                f"{label}: expected {pinned}, observed {observed}"
-            )
+            errors.append(f"{label}: expected {pinned}, observed {observed}")
     return errors, updated
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("scenario")
-    parser.add_argument("--track", choices=["ares", "recomp", "both"],
-                        default="both")
+    parser.add_argument("--track", choices=["ares", "recomp", "both"], default="both")
     parser.add_argument("--pin", action="store_true",
-                        help="Rewrite scenario YAML with newly observed hashes.")
+                        help="Rewrite scenario YAML with newly observed hashes. Requires --track=both.")
     args = parser.parse_args()
+
+    if args.pin and args.track != "both":
+        print("--pin requires --track=both so both backends agree before committing hashes",
+              file=sys.stderr)
+        return 2
 
     path = Path(args.scenario)
     scenario = yaml.safe_load(path.read_text())
     backends = scenario.get("backends", {})
+    timeout_s = int(scenario.get("timeout", DEFAULT_TIMEOUT_S))
 
-    all_events: dict[str, list[dict[str, Any]]] = {}
-    for name in (["ares", "recomp"] if args.track == "both" else [args.track]):
-        cfg = backends.get(name)
-        if cfg is None:
+    names = ["ares", "recomp"] if args.track == "both" else [args.track]
+    for name in names:
+        if backends.get(name) is None:
             print(f"scenario missing backends.{name}", file=sys.stderr)
             return 2
-        all_events[name] = run_backend(cfg["cmd"], cfg.get("env", {}))
+
+    all_events: dict[str, list[dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        futures = {
+            name: pool.submit(
+                run_backend,
+                backends[name]["cmd"],
+                backends[name].get("env", {}),
+                timeout_s,
+            )
+            for name in names
+        }
+        for name, fut in futures.items():
+            all_events[name] = fut.result()
 
     errors: list[str] = []
-    updated_any = False
+    cross_errors = diff_tracks(all_events) if args.track == "both" else []
     for name, events in all_events.items():
-        errs, updated = validate_against_pins(events, scenario)
+        errs, _updated = validate_against_pins(events, scenario)
         errors.extend(f"{name}: {e}" for e in errs)
-        updated_any = updated_any or updated
+    errors.extend(f"cross-track: {e}" for e in cross_errors)
 
-    if args.track == "both":
-        errors.extend(
-            f"cross-track: {e}"
-            for e in diff_tracks(all_events["ares"], all_events["recomp"])
-        )
-
-    if updated_any and args.pin:
+    if args.pin and not errors:
         path.write_text(yaml.safe_dump(scenario, sort_keys=False))
         print(f"updated {path} with new pins")
 
