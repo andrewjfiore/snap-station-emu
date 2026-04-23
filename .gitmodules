@@ -1,0 +1,24 @@
+# Pinned N64 decompilation + analysis toolchain.
+# Bootstrap with:  git submodule update --init --recursive
+#
+# Rationale for each submodule is documented in emu/docs/METHODOLOGY.md.
+
+[submodule "tools/splat"]
+	path = tools/splat
+	url = https://github.com/ethteck/splat.git
+
+[submodule "tools/N64Recomp"]
+	path = tools/N64Recomp
+	url = https://github.com/N64Recomp/N64Recomp.git
+
+[submodule "tools/mips_to_c"]
+	path = tools/mips_to_c
+	url = https://github.com/matt-kempster/mips_to_c.git
+
+[submodule "tools/crunch64"]
+	path = tools/crunch64
+	url = https://github.com/Decompollaborate/crunch64.git
+
+[submodule "tools/pokemonsnap-reference"]
+	path = tools/pokemonsnap-reference
+	url = https://github.com/pmret/pokemonsnap.git
