@@ -8,13 +8,15 @@
  * The existing snap_station_win32.c stays on main through Phase 2 so
  * Windows builds do not break mid-flight. When the win32 bridge lands,
  * it moves to archive/ with the .bat scripts.
+ *
+ * Callers produce the sticker sheet via src/sticker_sheet.c's
+ * ss_sheet_save_bmp() and pass the resulting path here; this keeps the
+ * BMP writer as the single source of truth for on-disk format.
  */
 #ifndef SNAP_STATION_PRINT_BRIDGE_H
 #define SNAP_STATION_PRINT_BRIDGE_H
 
 #include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,19 +27,16 @@ typedef struct {
      * "use the system default printer." */
     const char *printer_name;
     /* Media size hint. For Snap Station output the only supported size
-     * is hagaki (100x148 mm); other values are reserved. */
+     * is hagaki (100x148 mm); other values are reserved. NULL defers
+     * to printer defaults. */
     const char *media;
-    /* If true, skip the OS confirmation dialog. On Windows this drops
-     * straight into the spooler; on Linux/macOS `lp` never dialogs. */
-    bool silent;
 } print_bridge_opts_t;
 
-/* Submit a composed sticker sheet image to the print subsystem. `image`
- * is raw BMP or PNG bytes produced by src/sticker_sheet.c. Returns true
- * on successful submission (not successful print; the job is queued).
- */
-bool print_bridge_submit(const void *image, size_t image_len,
-                         const print_bridge_opts_t *opts);
+/* Submit a composed sticker sheet file (BMP, as produced by
+ * ss_sheet_save_bmp) to the print subsystem. Returns true on successful
+ * submission (queued); actual print completion is asynchronous. */
+bool print_bridge_submit_path(const char *path,
+                              const print_bridge_opts_t *opts);
 
 #ifdef __cplusplus
 }

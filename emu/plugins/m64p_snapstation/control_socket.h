@@ -13,7 +13,6 @@
 extern "C" {
 #endif
 
-/* Opaque handle. */
 typedef struct control_socket control_socket_t;
 
 /* Callback table the plugin registers so the socket can drive the
@@ -30,15 +29,10 @@ typedef struct {
 } control_socket_callbacks_t;
 
 /* Start the server on 127.0.0.1:port. Returns NULL on error. The server
- * spawns one background thread that accepts a single client at a time. */
+ * spawns one background thread that accepts a single client at a time;
+ * a second connecting client waits until the first disconnects. */
 control_socket_t *control_socket_start(uint16_t port,
                                        const control_socket_callbacks_t *cb);
-
-/* Block on pending requests and return after the next one is handled.
- * Most callers instead let the background thread drive things and poll
- * shared state from the main loop. Returns false if the socket has been
- * shut down. */
-bool control_socket_pump(control_socket_t *cs);
 
 /* Gracefully shut down. Safe to call from any thread. */
 void control_socket_stop(control_socket_t *cs);

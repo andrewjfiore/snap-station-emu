@@ -9,6 +9,10 @@ description: |
   Requires a smart card with >= 1 credit pre-inserted via the control
   socket (see emu/plugins/m64p_snapstation/README.md).
 
+# Override run_script.py's default 60s per-backend wait for the longer
+# gallery walkthrough. Seconds.
+timeout: 180
+
 backends:
   ares:
     cmd:
@@ -37,7 +41,6 @@ inputs:
   - at: 540
     control: display_photo
     index: 0
-  # labels photo_1 through photo_15 repeat the display_photo step.
 
 expected_hashes:
   title: null

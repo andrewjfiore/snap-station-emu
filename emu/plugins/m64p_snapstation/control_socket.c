@@ -3,13 +3,10 @@
  * Loopback JSON control surface. Minimal hand-rolled parser so we do
  * not drag in a JSON library for one tiny protocol. See README.md for
  * the full command list.
- *
- * This file is written for POSIX sockets with a Winsock fallback. Any
- * cross-platform touch-ups land in this file only; the header stays
- * stable.
  */
 #include "control_socket.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +29,8 @@
   #define closesock close
 #endif
 
+static const char OK_REPLY[] = "{\"ok\":true}\n";
+
 struct control_socket {
     sock_t listener;
     control_socket_callbacks_t cb;
@@ -52,41 +51,58 @@ static int find_number(const char *s, const char *key, long *out) {
     return 1;
 }
 
+/* Copy the string value of a JSON field into `out`. Returns false on
+ * any malformed input. Fixes the strncmp-prefix trap of comparing
+ * "press_print" against "press_printXYZ". */
+static bool extract_string_field(const char *line, const char *key,
+                                 char *out, size_t out_sz) {
+    const char *p = strstr(line, key);
+    if (!p) return false;
+    p = strchr(p, ':');
+    if (!p) return false;
+    p = strchr(p, '"');
+    if (!p) return false;
+    p++;
+    const char *end = strchr(p, '"');
+    if (!end) return false;
+    size_t n = (size_t)(end - p);
+    if (n >= out_sz) return false;
+    memcpy(out, p, n);
+    out[n] = '\0';
+    return true;
+}
+
 static void handle_line(struct control_socket *cs, const char *line,
                         char *reply, size_t reply_sz) {
-    /* dispatch by "cmd" */
-    const char *cmd = strstr(line, "\"cmd\"");
-    if (!cmd) { snprintf(reply, reply_sz, "{\"error\":\"no cmd\"}\n"); return; }
-    cmd = strchr(cmd, ':');
-    if (!cmd) { snprintf(reply, reply_sz, "{\"error\":\"no value\"}\n"); return; }
-    cmd = strchr(cmd, '\"');
-    if (!cmd) { snprintf(reply, reply_sz, "{\"error\":\"no quote\"}\n"); return; }
-    cmd++;
+    char cmd[32];
+    if (!extract_string_field(line, "\"cmd\"", cmd, sizeof(cmd))) {
+        snprintf(reply, reply_sz, "{\"error\":\"bad cmd\"}\n");
+        return;
+    }
 
-    long n = 0;
-
-    if (!strncmp(cmd, "insert_card", 11) && cs->cb.insert_card) {
+    if (!strcmp(cmd, "insert_card") && cs->cb.insert_card) {
+        long n = 0;
         find_number(line, "\"credits\"", &n);
         cs->cb.insert_card((uint32_t)n);
-        snprintf(reply, reply_sz, "{\"ok\":true}\n");
-    } else if (!strncmp(cmd, "remove_card", 11) && cs->cb.remove_card) {
+        snprintf(reply, reply_sz, "%s", OK_REPLY);
+    } else if (!strcmp(cmd, "remove_card") && cs->cb.remove_card) {
         cs->cb.remove_card();
-        snprintf(reply, reply_sz, "{\"ok\":true}\n");
-    } else if (!strncmp(cmd, "get_balance", 11) && cs->cb.get_balance) {
-        uint32_t c = cs->cb.get_balance();
-        snprintf(reply, reply_sz, "{\"credits\":%u}\n", (unsigned)c);
-    } else if (!strncmp(cmd, "press_print", 11) && cs->cb.press_print) {
+        snprintf(reply, reply_sz, "%s", OK_REPLY);
+    } else if (!strcmp(cmd, "get_balance") && cs->cb.get_balance) {
+        snprintf(reply, reply_sz, "{\"credits\":%u}\n",
+                 (unsigned)cs->cb.get_balance());
+    } else if (!strcmp(cmd, "press_print") && cs->cb.press_print) {
         cs->cb.press_print();
-        snprintf(reply, reply_sz, "{\"ok\":true}\n");
-    } else if (!strncmp(cmd, "photo_ready", 11) && cs->cb.photo_ready) {
+        snprintf(reply, reply_sz, "%s", OK_REPLY);
+    } else if (!strcmp(cmd, "photo_ready") && cs->cb.photo_ready) {
         cs->cb.photo_ready();
-        snprintf(reply, reply_sz, "{\"ok\":true}\n");
-    } else if (!strncmp(cmd, "end_print", 9) && cs->cb.end_print) {
+        snprintf(reply, reply_sz, "%s", OK_REPLY);
+    } else if (!strcmp(cmd, "end_print") && cs->cb.end_print) {
         cs->cb.end_print();
-        snprintf(reply, reply_sz, "{\"ok\":true}\n");
-    } else if (!strncmp(cmd, "peek_flow", 9) && cs->cb.peek_flow) {
-        uint8_t f = cs->cb.peek_flow();
-        snprintf(reply, reply_sz, "{\"flow\":\"0x%02X\"}\n", f);
+        snprintf(reply, reply_sz, "%s", OK_REPLY);
+    } else if (!strcmp(cmd, "peek_flow") && cs->cb.peek_flow) {
+        snprintf(reply, reply_sz, "{\"flow\":\"0x%02X\"}\n",
+                 cs->cb.peek_flow());
     } else {
         snprintf(reply, reply_sz, "{\"error\":\"unknown cmd\"}\n");
     }
@@ -136,6 +152,9 @@ control_socket_t *control_socket_start(uint16_t port,
 #ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return NULL;
+#else
+    /* A closed client can otherwise kill the host plugin on send(). */
+    signal(SIGPIPE, SIG_IGN);
 #endif
     sock_t s = socket(AF_INET, SOCK_STREAM, 0);
     if (s == SOCK_INVALID) return NULL;
@@ -164,10 +183,6 @@ control_socket_t *control_socket_start(uint16_t port,
     pthread_create(&cs->thread, NULL, listener_thread, cs);
 #endif
     return cs;
-}
-
-bool control_socket_pump(control_socket_t *cs) {
-    return cs && cs->running;
 }
 
 void control_socket_stop(control_socket_t *cs) {
