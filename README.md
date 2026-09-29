@@ -1,5 +1,7 @@
 # Snap Station Emulation for Mupen64Plus
 
+> **LLM coding experiment.** This project was built mostly by AI coding agents as an experiment. It is not maintained, reviewed, or tested for real use. Do not rely on it for anything that matters.
+
 Emulates the Pokemon Snap Station kiosk hardware so a ROM running under
 Mupen64Plus can trigger a real print job through the standard Windows
 printer dialog. The output is a 4x4 sticker sheet laid out on a
